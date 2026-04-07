@@ -53,18 +53,67 @@ So I stopped fighting the old rhythm and built a new one.
 
 ---
 
+### The missing piece most people skip: specs
+
+But before I talk about multi-agent dispatch, I need to talk about the mistake I see *everyone* making — including my past self.
+
+**People jump straight to code.**
+
+"Build me an onboarding flow." And the AI starts writing React components. No requirements. No technical plan. No thought about edge cases, API contracts, or how this fits the existing architecture.
+
+For a bug fix or a config change, sure — just do it. But for anything substantial? You're building on sand.
+
+Here's what I learned building a full product with AI agents: **the bigger the task, the more you need to think before you code.** This isn't a new idea — it's how real engineering teams work. The AI era didn't change that. It just made it easier to skip, because the code comes so fast.
+
+So I built a triage system:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  TASK TRIAGE                         │
+├──────────┬──────────────────────────────────────────┤
+│ S/M      │ Bug fix, new screen, simple feature      │
+│          │ → Skip specs. Dispatch agent. Ship.      │
+├──────────┼──────────────────────────────────────────┤
+│ L        │ New feature spanning multiple modules     │
+│          │ → Write a Technical Spec (TSD) first     │
+│          │ → Then code against the spec             │
+├──────────┼──────────────────────────────────────────┤
+│ XL       │ New product area, major feature set       │
+│          │ → Write Functional Spec (FSD) first      │
+│          │ → Then Technical Spec (TSD)              │
+│          │ → Then code against both                 │
+└──────────┴──────────────────────────────────────────┘
+```
+
+**FSD** answers: *What are we building and why?* User goals, functional requirements, user flows, edge cases, non-goals, success metrics.
+
+**TSD** answers: *How are we building it?* Architecture, API contracts, data models, state management, integration points, implementation plan with agent assignments.
+
+The beauty is: **the specs themselves get written by agents too.** I don't write them by hand. I dispatch GPT 5.4 or MiniMax to draft the spec, I review and approve it, and *then* the coding agents have a clear target to build against.
+
+This single change — specs before code for big tasks — eliminated 80% of the "it built the wrong thing" moments that were costing me entire days of rework.
+
+---
+
 ### The new architecture: Claude as PM, not as engineer
 
 Here's the mental shift that changed everything:
 
 **Claude doesn't write code anymore. Claude manages the team that writes code.**
 
-I restructured my entire workflow around a single idea: **Claude Code is the Technical PM. It coordinates, it dispatches, it reviews the reviews. But it doesn't touch the keyboard.**
+I restructured my entire workflow around a single idea: **Claude Code is the Technical PM. It triages tasks, writes specs when needed, dispatches agents, reviews the reviews. But it rarely touches the keyboard itself.**
 
 The actual coding? That goes to cheaper, faster, often *local* models — through MCP tools that Claude can call directly.
 
 ```
 User → Claude Code (PM)
+         │
+         ├── Triage: How big is this task?
+         │
+         ├── [XL] Write FSD → approve → Write TSD → approve
+         ├── [L]  Write TSD → approve
+         ├── [S/M] Skip specs
+         │
          ├── opencode_fire → Qwen3-Coder (local, FREE) → writes code
          ├── opencode_fire → MiniMax-M2.7 → reviews code
          ├── codex → GPT 5.4 → complex review
@@ -82,13 +131,13 @@ I treat my AI agents like a real engineering team with seniority levels:
 |------|-------|------|-------------|
 | Junior Dev | Gemma-4-31b-it | **Free** (local) | Boilerplate, tests, simple fixes |
 | Mid Dev | Qwen3-Coder | **Free** (local) | General coding, feature implementation |
-| Mid Dev | MiniMax-M2.7 | Low | Coding + code review |
-| Mid Dev | Qwen3.6 Plus | Free | Coding + code review |
-| Senior Dev | GPT 5.4 Codex | Medium | Complex tasks, deep review |
+| Mid Dev | MiniMax-M2.7 | Low | Coding + code review + spec writing |
+| Mid Dev | Qwen3.6 Plus | Free | Coding + code review + spec writing |
+| Senior Dev | GPT 5.4 Codex | Medium | Complex tasks, deep review, FSD/TSD |
 | Senior Dev | Sonnet 4.6 | High | Cross-cutting complex work |
 | Principal | Opus 4.6 | **Highest** | Architecture decisions only |
 
-**The rule is dead simple: always pick the cheapest model that can do the job.** A junior dev doesn't need to be a principal engineer. A variable rename doesn't need Opus.
+**The rule is dead simple: always pick the cheapest model that can do the job.** A junior dev doesn't need to be a principal engineer. A variable rename doesn't need Opus. A spec draft doesn't need Anthropic.
 
 ---
 
@@ -106,25 +155,39 @@ No exceptions. Every piece of code goes through this:
 
 The key insight: **the reviewer must always be a different agent than the writer.** This isn't just process theater — different models catch different things. MiniMax catches what Qwen misses. GPT 5.4 catches what MiniMax misses. It's genuine diversity of thought, at machine speed.
 
+For large tasks, the TSD's implementation plan drives step 1 — each sub-task gets dispatched to its assigned agent, and steps 2-5 apply to each.
+
 ---
 
-### How it actually works — the dispatch
+### How it actually works — two real examples
 
-This isn't theoretical. Here's what a real task looks like in my terminal:
+**Example 1: Small task (Tier S)**
 
-I tell Claude Code: *"Implement the onboarding analytics events."*
+*"Fix the auth token refresh race condition."*
 
-Claude Code (as PM) doesn't write a single line. Instead:
+Claude Code triages this as S — simple bug fix. No specs needed. It dispatches Qwen3-Coder to fix it, MiniMax reviews the fix, tests run, done. Total Anthropic cost: near zero.
 
-1. It calls `opencode_fire` to dispatch Qwen3-Coder for the implementation
-2. While that runs, it calls `opencode_fire` again to have Gemma-4 write the test stubs — **in parallel**
-3. When the code is done, it calls `opencode_review_changes` and dispatches MiniMax-M2.7 for review
-4. If the review flags issues, it dispatches Qwen3-Coder again for fixes
-5. Runs `pnpm validate`
-6. Dispatches Gemma-4 as "Junior PM" for UX sanity check
-7. Only then: merge
+**Example 2: Large task (Tier XL)**
 
-Claude's Anthropic token usage in this entire flow? **Near zero.** It only consumed tokens for the orchestration decisions — which model to pick, what to dispatch, how to interpret the review.
+*"Build the complete onboarding flow with voice diagnostic, analysis, and results."*
+
+Claude Code triages this as XL — new user-facing flow across multiple modules.
+
+1. Dispatches GPT 5.4 to write the FSD — user goals, screen flows, edge cases
+2. I review and approve the FSD
+3. Dispatches MiniMax to write the TSD — API contracts, state management, component breakdown, implementation plan
+4. I review and approve the TSD
+5. TSD has 8 sub-tasks. Claude dispatches them:
+   - 4 tasks to Qwen3-Coder (local, free) — in parallel
+   - 2 tasks to MiniMax (low cost)
+   - 2 tasks to GPT 5.4 (complex integration logic)
+6. Each completed task gets reviewed by a *different* agent
+7. Tests run after each merge
+8. Gemma-4 does final UX review from user perspective
+
+The whole feature ships in a day. Anthropic token usage? **Only the triage decisions and orchestration.** Maybe 5% of the total work.
+
+Without the FSD/TSD step, this same feature would have taken 3 days of rework because the first agent would have built the wrong state machine, the second would have misunderstood the API contract, and I'd be debugging integration issues instead of shipping.
 
 ---
 
@@ -135,15 +198,17 @@ Before this approach:
 - $20 burned on two code reviews
 - Constant hitting weekly limits on Max Plan
 - Daily cost anxiety
+- Large features took days of rework — "it built the wrong thing"
 
 After:
 - **~12-15% Anthropic usage** — only for orchestration + rare complex decisions
 - Local models handle 60-70% of coding (Qwen3-Coder, Gemma-4) — **completely free**
 - MiniMax and Qwen3.6 handle another 15-20% — minimal cost
-- GPT 5.4 Codex handles complex reviews — moderate cost
+- GPT 5.4 Codex handles complex reviews and specs — moderate cost
 - Opus/Sonnet only for architecture decisions — rare
+- Large features ship right the first time because specs exist
 
-**Same output. Better reviews. Fraction of the cost.**
+**Same output. Better reviews. Specs that prevent rework. Fraction of the cost.**
 
 ---
 
@@ -156,31 +221,36 @@ npx skills add htuzel/technical-pm
 ```
 
 Once installed, Claude Code automatically:
-- Acts as Technical PM instead of doing everything itself
-- Dispatches to the cheapest suitable agent
-- Enforces the CODE → REVIEW → TEST → MANUAL → MERGE pipeline
+- **Triages every task** into S/M/L/XL complexity tiers
+- **Writes FSD/TSD specs** for large tasks before any code is written
+- **Dispatches to the cheapest suitable agent** for both specs and code
+- **Enforces the CODE → REVIEW → TEST → MANUAL → MERGE pipeline**
 - Runs independent tasks in parallel
 - Only uses Anthropic tokens for orchestration
 
-It's one command. The skill teaches Claude *how to manage* instead of *how to code*.
+It's one command. The skill teaches Claude *how to think about what to build before building it*, and then *how to manage the team* instead of doing everything itself.
 
 ---
 
 ### What I learned
 
-**1. The best model isn't the most expensive one — it's the right one for the task.**
+**1. Specs aren't bureaucracy — they're the cheapest debugging tool you have.**
+
+A 15-minute spec review catches architecture mistakes that would cost a full day of rework. When your coding agents are fast, building the wrong thing fast is worse than building the right thing slightly slower.
+
+**2. The best model isn't the most expensive one — it's the right one for the task.**
 
 A $0 local model writing a React component is not worse than Opus writing it. It's often the same quality. The tokens don't care about the price tag.
 
-**2. AI agent diversity beats AI agent power.**
+**3. AI agent diversity beats AI agent power.**
 
 One Opus doing everything < Qwen writing + MiniMax reviewing + GPT doing deep review. Different architectures, different training data, different blind spots. The review chain catches more bugs than any single model ever could.
 
-**3. The "PM pattern" is the future of AI-assisted coding.**
+**4. The "PM pattern" is the future of AI-assisted coding.**
 
-We're heading toward a world where the human (or the most capable AI) is the coordinator, not the executor. The sooner you internalize this, the sooner your costs drop and your quality rises.
+We're heading toward a world where the human (or the most capable AI) is the coordinator, not the executor. Triage, spec, dispatch, review. The sooner you internalize this, the sooner your costs drop and your quality rises.
 
-**4. Vendor lock-in is the real scam.**
+**5. Vendor lock-in is the real scam.**
 
 My anger at Anthropic's pricing was legitimate. But the real mistake was giving them 100% of my workflow. Now if Claude doubles in price tomorrow, I shrug. 85% of my work doesn't touch their servers.
 
@@ -192,7 +262,7 @@ When the music changes, the rhythm must change too.
 
 The music changed: AI models got cheaper, local models got better, multi-agent tooling matured, and single-vendor pricing became unsustainable.
 
-My rhythm changed: Claude became the conductor, not the entire orchestra.
+My rhythm changed: Claude stopped coding and started managing. Specs come before code. The cheapest capable agent gets the job. Every review is done by a different model.
 
 Your rhythm should change too.
 
@@ -204,4 +274,4 @@ Your rhythm should change too.
 
 ---
 
-**If you're still running everything through a single AI model, you're paying 2024 prices for a 2024 workflow in a 2026 world. The music changed. Are you still dancing to the old beat?**
+**If you're still running everything through a single AI model with no specs and no triage, you're paying 2024 prices for a 2024 workflow in a 2026 world. The music changed. Are you still dancing to the old beat?**
