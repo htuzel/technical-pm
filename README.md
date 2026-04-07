@@ -16,7 +16,7 @@ npx skills add htuzel/technical-pm
 - Ensures writer != reviewer for every code change
 - Runs independent tasks in parallel via `opencode_fire`
 
-## Agent Lineup
+## Agent Lineup (It depends on your AI Subscriptions/Local Machine Capability, also may need skills.sh file change) 
 
 | Level | Agent | Cost |
 |-------|-------|------|
